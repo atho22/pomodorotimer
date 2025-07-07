@@ -252,6 +252,29 @@
             font-weight: 600;
             font-size: 1.1em;
         }
+
+        .status-indicator {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 10px;
+            font-size: 0.9em;
+            font-weight: 600;
+        }
+
+        .status-running {
+            background: rgba(76, 175, 80, 0.2);
+            color: #4caf50;
+        }
+
+        .status-paused {
+            background: rgba(255, 152, 0, 0.2);
+            color: #ff9800;
+        }
+
+        .status-completed {
+            background: rgba(233, 30, 99, 0.2);
+            color: #e91e63;
+        }
         
         @media (max-width: 600px) {
             .container { padding: 20px; margin: 10px; }
@@ -270,6 +293,8 @@
         <p class="subtitle">Khusus untuk Tasya tersayang ❤️</p>
         
         <div class="timer-display" id="timerDisplay">25:00</div>
+        
+        <div class="status-indicator" id="statusIndicator">Siap memulai! 🚀</div>
         
         <div class="mode-selector">
             <button class="mode-btn active" data-mode="work">Kerja 📚</button>
@@ -307,6 +332,8 @@
                 this.isRunning = false;
                 this.sessionCount = 0;
                 this.timer = null;
+                this.startTime = null;
+                this.pausedTime = null;
                 
                 this.quotes = [
                     {text: "Setiap langkah kecil yang kamu ambil hari ini membawa kamu lebih dekat pada impianmu. Aku bangga sama kamu, Tasya!", author: "Dari yang sayang banget sama kamu ❤️"},
@@ -323,12 +350,14 @@
                 
                 this.init();
                 this.createFloatingHearts();
+                this.handleVisibilityChange();
             }
             
             init() {
                 this.updateDisplay();
                 this.bindEvents();
                 this.updateQuote();
+                this.updateStatus('Siap memulai! 🚀');
             }
             
             bindEvents() {
@@ -341,36 +370,110 @@
                 });
             }
             
+            // Menangani perubahan visibilitas tab
+            handleVisibilityChange() {
+                document.addEventListener('visibilitychange', () => {
+                    if (this.isRunning) {
+                        if (document.hidden) {
+                            // Tab menjadi tidak aktif, simpan waktu
+                            this.pausedTime = Date.now();
+                        } else {
+                            // Tab menjadi aktif kembali, hitung waktu yang terlewat
+                            if (this.pausedTime) {
+                                const timePassed = Math.floor((Date.now() - this.pausedTime) / 1000);
+                                this.timeLeft = Math.max(0, this.timeLeft - timePassed);
+                                this.updateDisplay();
+                                
+                                if (this.timeLeft === 0) {
+                                    this.complete();
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+            
             start() {
                 this.isRunning = true;
+                this.startTime = Date.now();
+                this.pausedTime = null;
+                
                 document.getElementById('startBtn').style.display = 'none';
                 document.getElementById('pauseBtn').style.display = 'inline-block';
+                this.updateStatus('Timer berjalan... 🔥', 'running');
                 
                 this.timer = setInterval(() => {
+                    this.tick();
+                }, 1000);
+                
+                // Backup dengan requestAnimationFrame untuk akurasi lebih baik
+                this.animationFrame = requestAnimationFrame(() => this.accurateTimer());
+            }
+            
+            // Timer yang lebih akurat menggunakan timestamp
+            accurateTimer() {
+                if (this.isRunning) {
+                    const now = Date.now();
+                    const elapsed = Math.floor((now - this.startTime) / 1000);
+                    const originalTime = this.modes[this.currentMode];
+                    this.timeLeft = Math.max(0, originalTime - elapsed);
+                    
+                    this.updateDisplay();
+                    
+                    if (this.timeLeft === 0) {
+                        this.complete();
+                    } else {
+                        this.animationFrame = requestAnimationFrame(() => this.accurateTimer());
+                    }
+                }
+            }
+            
+            tick() {
+                if (this.isRunning && this.timeLeft > 0) {
                     this.timeLeft--;
                     this.updateDisplay();
                     
                     if (this.timeLeft === 0) {
                         this.complete();
                     }
-                }, 1000);
+                }
             }
             
             pause() {
                 this.isRunning = false;
                 clearInterval(this.timer);
+                if (this.animationFrame) {
+                    cancelAnimationFrame(this.animationFrame);
+                }
+                
                 document.getElementById('startBtn').style.display = 'inline-block';
                 document.getElementById('pauseBtn').style.display = 'none';
+                this.updateStatus('Timer dihentikan sementara ⏸️', 'paused');
             }
             
             reset() {
                 this.pause();
                 this.timeLeft = this.modes[this.currentMode];
                 this.updateDisplay();
+                this.updateStatus('Timer direset 🔄');
             }
             
             complete() {
                 this.pause();
+                this.updateStatus('Sesi selesai! 🎉', 'completed');
+                
+                // Notifikasi browser jika didukung
+                if ('Notification' in window && Notification.permission === 'granted') {
+                    new Notification('Pomodoro Timer', {
+                        body: `Sesi ${this.currentMode} selesai!`,
+                        icon: '🍅'
+                    });
+                }
+                
+                // Vibration jika didukung (mobile)
+                if ('vibrate' in navigator) {
+                    navigator.vibrate([200, 100, 200]);
+                }
                 
                 if (this.currentMode === 'work') {
                     this.sessionCount++;
@@ -399,6 +502,13 @@
                     btn.classList.remove('active');
                 });
                 document.querySelector(`[data-mode="${mode}"]`).classList.add('active');
+                
+                const modeNames = {
+                    work: 'Kerja',
+                    shortBreak: 'Istirahat Pendek',
+                    longBreak: 'Istirahat Panjang'
+                };
+                this.updateStatus(`Mode: ${modeNames[mode]} 📝`);
             }
             
             updateDisplay() {
@@ -406,6 +516,15 @@
                 const seconds = this.timeLeft % 60;
                 document.getElementById('timerDisplay').textContent = 
                     `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            }
+            
+            updateStatus(message, type = '') {
+                const statusEl = document.getElementById('statusIndicator');
+                statusEl.textContent = message;
+                statusEl.className = 'status-indicator';
+                if (type) {
+                    statusEl.classList.add(`status-${type}`);
+                }
             }
             
             updateQuote() {
@@ -462,6 +581,11 @@
                     }, i * 100);
                 }
             }
+        }
+        
+        // Minta izin notifikasi
+        if ('Notification' in window && Notification.permission === 'default') {
+            Notification.requestPermission();
         }
         
         // Initialize the timer when page loads
